@@ -30,3 +30,26 @@ The script will:
 - Process all PDFs in the Input folder
 - Create an output.xlsx file with the extracted information
 - Show progress in the console
+
+# List of fields to extract: (Display Name, Search Pattern)
+FIELDS = [
+    ("Tag No.", "Tag No."),
+    ("Service", "Service"),
+    ("Line No.", "Line No."),
+    # ... add all other fields here ...
+    ("Serial Number", "Serial Number"),
+]
+
+import re
+
+def extract_fields_from_text(text):
+    data = {}
+    for display_name, pattern in FIELDS:
+        # Simple regex to find 'pattern: value'
+        match = re.search(rf"{re.escape(pattern)}\s*[:\-]?\s*(.*)", text)
+        if match:
+            value = match.group(1).split('\n')[0].strip()
+        else:
+            value = ""
+        data[display_name] = value
+    return data
