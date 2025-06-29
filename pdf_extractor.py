@@ -119,12 +119,24 @@ def extract_text_from_pdf(pdf_path):
 
 def extract_fields_from_text(text):
     data = {}
+    lines = text.splitlines()
     for display_name, pattern in FIELDS:
-        match = re.search(rf"{re.escape(pattern)}\s*[:\-]?\s*(.*)", text)
-        if match:
-            value = match.group(1).split('\n')[0].strip()
-        else:
-            value = ""
+        value = ""
+        for i, line in enumerate(lines):
+            # Look for the pattern in the line
+            if re.search(rf"{re.escape(pattern)}", line):
+                # Try to extract value after the pattern, separated by colon, dash, or multiple spaces/tabs
+                match = re.search(rf"{re.escape(pattern)}\s*[:\-]?\s*(.*)", line)
+                if match and match.group(1).strip():
+                    value = match.group(1).strip()
+                else:
+                    # If nothing after the pattern, try the next line
+                    if i + 1 < len(lines):
+                        next_line = lines[i + 1].strip()
+                        # Avoid picking up another field name as value
+                        if not any(f[1] in next_line for f in FIELDS):
+                            value = next_line
+                break
         data[display_name] = value
     return data
 
