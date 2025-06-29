@@ -148,6 +148,32 @@ def extract_fields_from_text(text):
         data[display_name] = value
     return data
 
+def extract_fields_from_table(df):
+    # Try to map each field to a value from the table DataFrame
+    data = {}
+    for display_name, pattern in FIELDS:
+        value = ""
+        for i, row in df.iterrows():
+            for j, cell in enumerate(row):
+                if isinstance(cell, str) and pattern in cell:
+                    # Try to get value from next cell in the row
+                    if j + 1 < len(row):
+                        next_cell = row[j + 1]
+                        if isinstance(next_cell, str):
+                            value = next_cell.strip()
+                        else:
+                            value = str(next_cell)
+                    break
+            if value:
+                break
+        data[display_name] = value
+    return data
+
+def escape_excel_formula(val):
+    if isinstance(val, str) and val and val[0] in ('=', '+', '-', '@'):
+        return "'" + val
+    return val
+
 # --- NEW LOGIC: Camelot table extraction ---
 def process_pdfs(input_folder, output_folder='Output'):
     os.makedirs(output_folder, exist_ok=True)
@@ -158,9 +184,11 @@ def process_pdfs(input_folder, output_folder='Output'):
         used_camelot = False
         if camelot_available:
             try:
-                tables = camelot.read_pdf(pdf_path, pages='1', flavor='lattice')
+                tables = camelot.read_pdf(pdf_path, pages='1', flavor='stream')
                 if tables and len(tables) > 0:
                     df = tables[0].df
+                    # Before saving to Excel:
+                    df = df.applymap(escape_excel_formula)
                     output_file = os.path.join(output_folder, f"{os.path.splitext(pdf_file)[0]}_table.xlsx")
                     df.to_excel(output_file, index=False, header=False)
                     print(f"[Camelot] Saved table to {output_file}")
