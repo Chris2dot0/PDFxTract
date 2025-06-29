@@ -2,6 +2,12 @@ import os
 import re
 from PyPDF2 import PdfReader
 import pandas as pd
+# --- NEW: Import Camelot for table extraction ---
+try:
+    import camelot
+    camelot_available = True
+except ImportError:
+    camelot_available = False
 
 # List of fields to extract: (Display Name, Search Pattern)
 FIELDS = [
@@ -117,22 +123,21 @@ def extract_text_from_pdf(pdf_path):
         print(f"Error reading PDF {pdf_path}: {str(e)}")
         return ""
 
+# --- OLD LOGIC: Text-based extraction (fallback) ---
 def extract_fields_from_text(text):
+    # [OLD LOGIC] This function is kept as a fallback. Comment out if not needed.
     data = {}
     lines = text.splitlines()
     for display_name, pattern in FIELDS:
         value = ""
         for i, line in enumerate(lines):
-            # Split line into columns by 2+ spaces or tabs
             columns = re.split(r"\s{2,}|\t+", line)
             for j, col in enumerate(columns):
                 if pattern in col:
-                    # Try to get the next non-empty column as value
                     for k in range(j+1, len(columns)):
                         if columns[k].strip():
                             value = columns[k].strip()
                             break
-                    # If not found, try the next line
                     if not value and i + 1 < len(lines):
                         next_line_cols = re.split(r"\s{2,}|\t+", lines[i+1])
                         if next_line_cols:
@@ -143,30 +148,34 @@ def extract_fields_from_text(text):
         data[display_name] = value
     return data
 
-def process_pdfs(input_folder):
-    results = []
+# --- NEW LOGIC: Camelot table extraction ---
+def process_pdfs(input_folder, output_folder='Output'):
+    os.makedirs(output_folder, exist_ok=True)
     pdf_files = [f for f in os.listdir(input_folder) if f.lower().endswith('.pdf')]
     for pdf_file in pdf_files:
         pdf_path = os.path.join(input_folder, pdf_file)
         print(f"Processing: {pdf_file}")
-        text = extract_text_from_pdf(pdf_path)
-        fields_data = extract_fields_from_text(text)
-        fields_data['Filename'] = pdf_file
-        results.append(fields_data)
-    return results
-
-def get_next_output_filename(output_folder, base_name="output", ext="xlsx"):
-    os.makedirs(output_folder, exist_ok=True)
-    existing = [f for f in os.listdir(output_folder) if f.startswith(base_name) and f.endswith(f'.{ext}')]
-    nums = [int(re.findall(r'_(\d+)\.', f)[0]) for f in existing if re.findall(r'_(\d+)\.', f)]
-    next_num = max(nums) + 1 if nums else 1
-    return os.path.join(output_folder, f"{base_name}_{next_num:03d}.{ext}")
-
-def save_to_excel(data, output_folder='Output'):
-    output_file = get_next_output_filename(output_folder)
-    df = pd.DataFrame(data)
-    df.to_excel(output_file, index=False)
-    print(f"Data saved to {output_file}")
+        used_camelot = False
+        if camelot_available:
+            try:
+                tables = camelot.read_pdf(pdf_path, pages='1', flavor='lattice')
+                if tables and len(tables) > 0:
+                    df = tables[0].df
+                    output_file = os.path.join(output_folder, f"{os.path.splitext(pdf_file)[0]}_table.xlsx")
+                    df.to_excel(output_file, index=False, header=False)
+                    print(f"[Camelot] Saved table to {output_file}")
+                    used_camelot = True
+            except Exception as e:
+                print(f"[Camelot] Error processing {pdf_file}: {e}")
+        if not used_camelot:
+            # --- FALLBACK: Use old text-based extraction logic ---
+            text = extract_text_from_pdf(pdf_path)
+            fields_data = extract_fields_from_text(text)
+            fields_data['Filename'] = pdf_file
+            df = pd.DataFrame([fields_data])
+            output_file = os.path.join(output_folder, f"{os.path.splitext(pdf_file)[0]}_fields.xlsx")
+            df.to_excel(output_file, index=False)
+            print(f"[Fallback] Saved extracted fields to {output_file}")
 
 def main():
     input_folder = 'Input'
@@ -174,11 +183,7 @@ def main():
     if not os.path.exists(input_folder):
         print(f"Error: {input_folder} folder not found!")
         return
-    results = process_pdfs(input_folder)
-    if results:
-        save_to_excel(results, output_folder)
-    else:
-        print("No PDF files found to process.")
+    process_pdfs(input_folder, output_folder)
 
 if __name__ == "__main__":
     main() 
