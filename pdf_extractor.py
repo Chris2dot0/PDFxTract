@@ -187,7 +187,6 @@ def process_pdfs(input_folder, output_folder='Output'):
                 tables = camelot.read_pdf(pdf_path, pages='1', flavor='stream')
                 if tables and len(tables) > 0:
                     df = tables[0].df
-                    # Before saving to Excel:
                     df = df.applymap(escape_excel_formula)
                     output_file = os.path.join(output_folder, f"{os.path.splitext(pdf_file)[0]}_table.xlsx")
                     df.to_excel(output_file, index=False, header=False)
