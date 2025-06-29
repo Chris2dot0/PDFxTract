@@ -123,19 +123,22 @@ def extract_fields_from_text(text):
     for display_name, pattern in FIELDS:
         value = ""
         for i, line in enumerate(lines):
-            # Look for the pattern in the line
-            if re.search(rf"{re.escape(pattern)}", line):
-                # Try to extract value after the pattern, separated by colon, dash, or multiple spaces/tabs
-                match = re.search(rf"{re.escape(pattern)}\s*[:\-]?\s*(.*)", line)
-                if match and match.group(1).strip():
-                    value = match.group(1).strip()
-                else:
-                    # If nothing after the pattern, try the next line
-                    if i + 1 < len(lines):
-                        next_line = lines[i + 1].strip()
-                        # Avoid picking up another field name as value
-                        if not any(f[1] in next_line for f in FIELDS):
-                            value = next_line
+            # Split line into columns by 2+ spaces or tabs
+            columns = re.split(r"\s{2,}|\t+", line)
+            for j, col in enumerate(columns):
+                if pattern in col:
+                    # Try to get the next non-empty column as value
+                    for k in range(j+1, len(columns)):
+                        if columns[k].strip():
+                            value = columns[k].strip()
+                            break
+                    # If not found, try the next line
+                    if not value and i + 1 < len(lines):
+                        next_line_cols = re.split(r"\s{2,}|\t+", lines[i+1])
+                        if next_line_cols:
+                            value = next_line_cols[0].strip()
+                    break
+            if value:
                 break
         data[display_name] = value
     return data
