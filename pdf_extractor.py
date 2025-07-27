@@ -245,16 +245,55 @@ def extract_fields_from_table_improved(df: pd.DataFrame) -> Dict[str, str]:
     # Convert DataFrame to string for easier searching
     df_str = df.astype(str)
     
+    # Based on the screenshot, this is a key-value pair table where:
+    # - Field names are in column B (index 1)
+    # - Values are in column D (index 3) and sometimes E (index 4)
+    
+    # First, let's analyze the table structure
+    logger.info(f"Table shape: {df.shape}")
+    logger.info(f"Number of columns: {len(df.columns)}")
+    
+    # Look for the key-value pattern: field names in column B, values in column D
     for display_name, pattern in FIELDS:
         if display_name in data:  # Skip if already found
             continue
             
         value = ""
         
-        # Search in all cells
+        # Search for the field name in column B (index 1)
+        for row_idx, row in df_str.iterrows():
+            if len(row) > 1:  # Make sure column B exists
+                cell_b = str(row.iloc[1]).strip()  # Column B
+                if pattern in cell_b:
+                    # Found the field name in column B, now get the value from column D
+                    if len(row) > 3:  # Make sure column D exists
+                        cell_d = str(row.iloc[3]).strip()  # Column D
+                        if cell_d and cell_d != "nan" and cell_d != "<NA>" and cell_d != pattern:
+                            value = cell_d
+                            logger.debug(f"Found {display_name}: {value} at row {row_idx} (B->D)")
+                            break
+                    
+                    # If no value in column D, try column E
+                    if not value and len(row) > 4:
+                        cell_e = str(row.iloc[4]).strip()  # Column E
+                        if cell_e and cell_e != "nan" and cell_e != "<NA>" and cell_e != pattern:
+                            value = cell_e
+                            logger.debug(f"Found {display_name}: {value} at row {row_idx} (B->E)")
+                            break
+        
+        data[display_name] = value
+    
+    # For any fields not found in the key-value pattern, try alternative approaches
+    for display_name, pattern in FIELDS:
+        if display_name in data and data[display_name]:  # Skip if already found
+            continue
+            
+        value = ""
+        
+        # Search in all cells for the pattern
         for i, row in df_str.iterrows():
             for j, cell in enumerate(row):
-                if pattern in cell:
+                if pattern in str(cell):
                     # Try to get value from adjacent cells
                     value = extract_value_from_table_cell(df_str, i, j, pattern)
                     if value:
@@ -264,7 +303,162 @@ def extract_fields_from_table_improved(df: pd.DataFrame) -> Dict[str, str]:
         
         data[display_name] = value
         if value:
-            logger.debug(f"Found {display_name}: {value} in table")
+            logger.debug(f"Found {display_name}: {value} in table (adjacent search)")
+    
+    return data
+
+def extract_value_for_field(df: pd.DataFrame, row_idx: int, col_idx: int, pattern: str) -> str:
+    """Extract the value for a field found at a specific position."""
+    try:
+        # Try right neighbor first (most common for key-value pairs)
+        if col_idx + 1 < len(df.columns):
+            value = str(df.iloc[row_idx, col_idx + 1]).strip()
+            if value and value != "nan" and value != "<NA>" and value != pattern:
+                return value
+        
+        # Try right neighbor + 1 (sometimes there's an empty cell)
+        if col_idx + 2 < len(df.columns):
+            value = str(df.iloc[row_idx, col_idx + 2]).strip()
+            if value and value != "nan" and value != "<NA>" and value != pattern:
+                return value
+        
+        # Try bottom neighbor (for vertical layouts)
+        if row_idx + 1 < len(df):
+            value = str(df.iloc[row_idx + 1, col_idx]).strip()
+            if value and value != "nan" and value != "<NA>" and value != pattern:
+                return value
+        
+        # Try bottom neighbor + 1 (for vertical layouts with empty cells)
+        if row_idx + 2 < len(df):
+            value = str(df.iloc[row_idx + 2, col_idx]).strip()
+            if value and value != "nan" and value != "<NA>" and value != pattern:
+                return value
+        
+        # Try diagonal neighbor
+        if row_idx + 1 < len(df) and col_idx + 1 < len(df.columns):
+            value = str(df.iloc[row_idx + 1, col_idx + 1]).strip()
+            if value and value != "nan" and value != "<NA>" and value != pattern:
+                return value
+        
+        # Extract from current cell if it contains more than just the pattern
+        current_cell = str(df.iloc[row_idx, col_idx])
+        if pattern != current_cell:
+            # Try to extract value after the pattern in the same cell
+            value = current_cell.replace(pattern, "").strip()
+            if value and value != "nan" and value != "<NA>":
+                return value
+            
+            # Try to extract value before the pattern in the same cell
+            if pattern in current_cell:
+                parts = current_cell.split(pattern)
+                if len(parts) > 1 and parts[0].strip():
+                    return parts[0].strip()
+                
+    except Exception as e:
+        logger.debug(f"Error extracting value for field {pattern}: {e}")
+    
+    return ""
+
+def extract_fields_from_key_value_table(df: pd.DataFrame) -> Dict[str, str]:
+    """Specialized extraction for key-value pair tables like the one in the screenshot."""
+    data = {}
+    df_str = df.astype(str)
+    
+    logger.info("Using specialized key-value table extraction")
+    
+    # Based on the screenshot analysis:
+    # - Field names are in column B (index 1)
+    # - Values are in column D (index 3) and sometimes E (index 4)
+    
+    for display_name, pattern in FIELDS:
+        value = ""
+        
+        # Search for the field name in column B
+        for row_idx, row in df_str.iterrows():
+            if len(row) > 1:  # Ensure column B exists
+                cell_b = str(row.iloc[1]).strip()  # Column B
+                
+                # Check if this cell contains our field pattern
+                if pattern in cell_b:
+                    # Found the field name, now get the corresponding value
+                    if len(row) > 3:  # Ensure column D exists
+                        cell_d = str(row.iloc[3]).strip()  # Column D
+                        if cell_d and cell_d != "nan" and cell_d != "<NA>" and cell_d != pattern:
+                            value = cell_d
+                            logger.info(f"✓ {display_name}: {value} (from column D)")
+                            break
+                    
+                    # If no value in column D, try column E
+                    if not value and len(row) > 4:
+                        cell_e = str(row.iloc[4]).strip()  # Column E
+                        if cell_e and cell_e != "nan" and cell_e != "<NA>" and cell_e != pattern:
+                            value = cell_e
+                            logger.info(f"✓ {display_name}: {value} (from column E)")
+                            break
+        
+        data[display_name] = value
+        if not value:
+            logger.debug(f"✗ {display_name}: Not found")
+    
+    # Special handling for fields that have Min/Max values
+    # Look for Min/Max patterns and combine them
+    special_fields = {
+        "Ambient Temperature": ["Ambient", "Min", "Max", "5Ambient Min"],
+        "Available Air Supply Pressure": ["Available", "Min", "Max", "8Available Min"]
+    }
+    
+    for field_name, search_patterns in special_fields.items():
+        min_value = ""
+        max_value = ""
+        
+        # Search for Min and Max values
+        for row_idx, row in df_str.iterrows():
+            if len(row) > 1:
+                cell_b = str(row.iloc[1]).strip()
+                
+                # Look for Min pattern (including the specific patterns from your table)
+                if any(pattern in cell_b for pattern in ["Min", "Ambient Min", "Available Min", "5Ambient Min", "8Available Min"]):
+                    if len(row) > 3:
+                        cell_d = str(row.iloc[3]).strip()
+                        if cell_d and cell_d != "nan" and cell_d != "<NA>":
+                            min_value = cell_d
+                            logger.info(f"Found Min value for {field_name}: {min_value}")
+                    
+                    # Look for Max value in the same row (column E)
+                    if len(row) > 4:
+                        cell_e = str(row.iloc[4]).strip()
+                        if cell_e and cell_e != "nan" and cell_e != "<NA>" and cell_e != "Max":
+                            max_value = cell_e
+                            logger.info(f"Found Max value for {field_name}: {max_value}")
+                
+                # Also check for Max pattern specifically
+                elif "Max" in cell_b and len(row) > 3:
+                    cell_d = str(row.iloc[3]).strip()
+                    if cell_d and cell_d != "nan" and cell_d != "<NA>" and cell_d != "Max":
+                        max_value = cell_d
+                        logger.info(f"Found Max value for {field_name}: {max_value}")
+                
+                # Look for the next row that might contain the Max value
+                # This handles cases where Min and Max are on separate rows
+                if min_value and not max_value and row_idx + 1 < len(df_str):
+                    next_row = df_str.iloc[row_idx + 1]
+                    if len(next_row) > 3:
+                        next_cell_d = str(next_row.iloc[3]).strip()
+                        if next_cell_d and next_cell_d != "nan" and next_cell_d != "<NA>" and next_cell_d != "Max":
+                            max_value = next_cell_d
+                            logger.info(f"Found Max value for {field_name} in next row: {max_value}")
+        
+        # Combine Min and Max values
+        if min_value and max_value:
+            combined_value = f"{min_value}/{max_value}"
+            data[field_name] = combined_value
+            logger.info(f"✓ {field_name}: {combined_value} (Min/Max combined)")
+        elif min_value:
+            data[field_name] = min_value
+            logger.info(f"✓ {field_name}: {min_value} (Min only)")
+        elif max_value:
+            data[field_name] = max_value
+            logger.info(f"✓ {field_name}: {max_value} (Max only)")
     
     return data
 
@@ -274,27 +468,40 @@ def extract_value_from_table_cell(df: pd.DataFrame, row_idx: int, col_idx: int, 
         # Try right neighbor
         if col_idx + 1 < len(df.columns):
             value = str(df.iloc[row_idx, col_idx + 1]).strip()
-            if value and value != pattern and value != "nan":
+            if value and value != pattern and value != "nan" and value != "<NA>":
                 return value
         
         # Try bottom neighbor
         if row_idx + 1 < len(df):
             value = str(df.iloc[row_idx + 1, col_idx]).strip()
-            if value and value != pattern and value != "nan":
+            if value and value != pattern and value != "nan" and value != "<NA>":
                 return value
         
         # Try diagonal neighbor
         if row_idx + 1 < len(df) and col_idx + 1 < len(df.columns):
             value = str(df.iloc[row_idx + 1, col_idx + 1]).strip()
-            if value and value != pattern and value != "nan":
+            if value and value != pattern and value != "nan" and value != "<NA>":
+                return value
+        
+        # Try left neighbor (for cases where value is before the field name)
+        if col_idx > 0:
+            value = str(df.iloc[row_idx, col_idx - 1]).strip()
+            if value and value != pattern and value != "nan" and value != "<NA>":
                 return value
         
         # Extract from current cell if it contains more than just the pattern
         current_cell = str(df.iloc[row_idx, col_idx])
         if pattern != current_cell:
+            # Try to extract value after the pattern in the same cell
             value = current_cell.replace(pattern, "").strip()
-            if value and value != "nan":
+            if value and value != "nan" and value != "<NA>":
                 return value
+            
+            # Try to extract value before the pattern in the same cell
+            if pattern in current_cell:
+                parts = current_cell.split(pattern)
+                if len(parts) > 1 and parts[0].strip():
+                    return parts[0].strip()
                 
     except Exception as e:
         logger.debug(f"Error extracting value from table cell: {e}")
@@ -306,6 +513,83 @@ def escape_excel_formula(val):
     if isinstance(val, str) and val and val[0] in ('=', '+', '-', '@'):
         return "'" + val
     return val
+
+def debug_table_structure(df: pd.DataFrame, output_folder: str, filename: str):
+    """Debug function to analyze table structure and save detailed analysis."""
+    try:
+        debug_info = []
+        debug_info.append(f"Table Analysis for {filename}")
+        debug_info.append("=" * 50)
+        debug_info.append(f"Table shape: {df.shape}")
+        debug_info.append(f"Columns: {len(df.columns)}")
+        debug_info.append(f"Rows: {len(df)}")
+        debug_info.append("")
+        
+        # Analyze header row
+        if len(df) > 0:
+            debug_info.append("HEADER ROW ANALYSIS:")
+            debug_info.append("-" * 30)
+            header_row = df.iloc[0]
+            for i, cell in enumerate(header_row):
+                debug_info.append(f"Column {i}: '{cell}'")
+            debug_info.append("")
+        
+        # Analyze data rows
+        debug_info.append("DATA ROWS ANALYSIS:")
+        debug_info.append("-" * 30)
+        for row_idx in range(1, min(5, len(df))):  # First 4 data rows
+            debug_info.append(f"Row {row_idx}:")
+            row = df.iloc[row_idx]
+            for col_idx, cell in enumerate(row):
+                if str(cell).strip() and str(cell).strip() != "nan" and str(cell).strip() != "<NA>":
+                    debug_info.append(f"  Column {col_idx}: '{cell}'")
+            debug_info.append("")
+        
+        # Field pattern matching analysis
+        debug_info.append("FIELD PATTERN MATCHING:")
+        debug_info.append("-" * 30)
+        for display_name, pattern in FIELDS[:15]:  # First 15 fields for brevity
+            found = False
+            
+            # Search through all rows and columns
+            for row_idx, row in df.iterrows():
+                for col_idx, cell in enumerate(row):
+                    if pattern in str(cell):
+                        found = True
+                        debug_info.append(f"  {display_name}: Found at row {row_idx}, column {col_idx} = '{cell}'")
+                        
+                        # Also check what's in adjacent cells
+                        if col_idx + 1 < len(df.columns):
+                            right_cell = str(df.iloc[row_idx, col_idx + 1]).strip()
+                            if right_cell and right_cell != "nan" and right_cell != "<NA>":
+                                debug_info.append(f"    -> Right neighbor: '{right_cell}'")
+                        
+                        if col_idx + 2 < len(df.columns):
+                            right2_cell = str(df.iloc[row_idx, col_idx + 2]).strip()
+                            if right2_cell and right2_cell != "nan" and right2_cell != "<NA>":
+                                debug_info.append(f"    -> Right+1 neighbor: '{right2_cell}'")
+                        
+                        if row_idx + 1 < len(df):
+                            bottom_cell = str(df.iloc[row_idx + 1, col_idx]).strip()
+                            if bottom_cell and bottom_cell != "nan" and bottom_cell != "<NA>":
+                                debug_info.append(f"    -> Bottom neighbor: '{bottom_cell}'")
+                        
+                        break
+                if found:
+                    break
+            
+            if not found:
+                debug_info.append(f"  {display_name}: NOT FOUND")
+        
+        # Save debug info
+        debug_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}_debug.txt")
+        with open(debug_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(debug_info))
+        
+        logger.info(f"Debug analysis saved to: {debug_file}")
+        
+    except Exception as e:
+        logger.error(f"Error in debug analysis: {e}")
 
 def try_camelot_extraction(pdf_path: str) -> Tuple[bool, Optional[pd.DataFrame], str]:
     """Try multiple Camelot extraction methods for better table detection."""
@@ -364,8 +648,17 @@ def process_single_pdf(pdf_path: str, output_folder: str) -> Dict[str, any]:
         camelot_success, table_df, camelot_message = try_camelot_extraction(pdf_path)
         
         if camelot_success and table_df is not None:
-            # Extract fields from table
-            fields_data = extract_fields_from_table_improved(table_df)
+            # Debug table structure
+            debug_table_structure(table_df, output_folder, pdf_file)
+            
+            # Try specialized key-value table extraction first
+            fields_data = extract_fields_from_key_value_table(table_df)
+            
+            # If that didn't work well, try the improved general method
+            if not any(fields_data.values()):
+                logger.info("Key-value extraction failed, trying general method")
+                fields_data = extract_fields_from_table_improved(table_df)
+            
             fields_data['Filename'] = pdf_file
             
             # Save both table and extracted fields
